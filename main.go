@@ -139,12 +139,15 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 	wg.Add(len(concurrencies))
 	errors := make([]error, len(concurrencies))
 	statusCodesList := make([]map[int]int, len(concurrencies))
+	elapsedList := make([]time.Duration, len(concurrencies))
 	for i := range concurrencies {
 		go func(i int) {
 			defer wg.Done()
 
+			t0 := time.Now()
 			l := newLoader(client, urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i])
 			statusCodes, err := l.run(ctx)
+			elapsedList[i] = time.Since(t0)
 			if err != nil {
 				errors[i] = err
 				return
@@ -164,7 +167,7 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 		if i > 0 {
 			fmt.Println()
 		}
-		fmt.Printf("site %d, url=%s, host=%s, concurrency=%d, numRequests=%d, qps=%f\n", i, urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i])
+		fmt.Printf("site %d, url=%s, host=%s, concurrency=%d, numRequests=%d, qps=%g, elapsed=%s\n", i, urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i], elapsedList[i])
 		codes := maps.Keys(sc)
 		sort.Ints(codes)
 		for _, code := range codes {
