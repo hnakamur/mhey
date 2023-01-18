@@ -164,7 +164,7 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 		if i > 0 {
 			fmt.Println()
 		}
-		fmt.Printf("site %d, url=%s, host=%s, concurrency=%d, numRequests=%d\n", i, urls[i], hosts[i], concurrencies[i], numRequests[i])
+		fmt.Printf("site %d, url=%s, host=%s, concurrency=%d, numRequests=%d, qps=%f\n", i, urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i])
 		codes := maps.Keys(sc)
 		sort.Ints(codes)
 		for _, code := range codes {
