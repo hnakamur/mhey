@@ -206,6 +206,8 @@ func newLoader(url, host string, concurrency, numRequests int, qps float64, reqT
 }
 
 func (l *loader) run(ctx context.Context) (statusCodes map[int]int, err error) {
+	readyC := make(chan struct{}, l.concurrency)
+	startC := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(l.concurrency)
 	errors := make([]error, l.concurrency)
@@ -215,6 +217,8 @@ func (l *loader) run(ctx context.Context) (statusCodes map[int]int, err error) {
 			defer wg.Done()
 
 			r := newRequester(l.url, l.host, l.numRequests/l.concurrency, l.qps, l.reqTimeout)
+			readyC <- struct{}{}
+			<-startC
 			if err := r.sendRequests(ctx); err != nil {
 				errors[i] = err
 				return
@@ -222,6 +226,10 @@ func (l *loader) run(ctx context.Context) (statusCodes map[int]int, err error) {
 			statusCodesList[i] = r.statusCodes
 		}(i)
 	}
+	for i := 0; i < l.concurrency; i++ {
+		<-readyC
+	}
+	close(startC)
 	wg.Wait()
 
 	for _, err := range errors {
