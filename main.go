@@ -134,6 +134,9 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
+	log.Printf("start sending requests")
+
 	client := &http.Client{Timeout: reqTimeout}
 	var wg sync.WaitGroup
 	wg.Add(len(concurrencies))
@@ -156,6 +159,7 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 		}(i)
 	}
 	wg.Wait()
+	log.Printf("finished sending requests")
 
 	for _, err := range errors {
 		if err != nil {
