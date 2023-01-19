@@ -134,6 +134,10 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
+	if len(qps) == 0 {
+		qps = make([]float64, len(concurrencies))
+	}
+
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Printf("start sending requests")
 
