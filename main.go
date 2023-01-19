@@ -159,6 +159,9 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 		}
 	}
 
+	tc := totalConcurrencies(concurrencies)
+	readyC := make(chan struct{}, tc)
+	startC := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(len(concurrencies))
 	errors := make([]error, len(concurrencies))
@@ -170,7 +173,7 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 
 			t0 := time.Now()
 			l := newLoader(urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i], clientFactory)
-			statusCodes, err := l.run(ctx)
+			statusCodes, err := l.run(ctx, readyC, startC)
 			elapsedList[i] = time.Since(t0)
 			if err != nil {
 				errors[i] = err
@@ -179,6 +182,10 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 			statusCodesList[i] = statusCodes
 		}(i)
 	}
+	for i := 0; i < tc; i++ {
+		<-readyC
+	}
+	close(startC)
 	wg.Wait()
 	log.Printf("finished sending requests")
 
@@ -210,6 +217,14 @@ func newHTTPClient(reqTimeout time.Duration) *http.Client {
 	}
 }
 
+func totalConcurrencies(concurrencies []int) int {
+	total := 0
+	for _, c := range concurrencies {
+		total += c
+	}
+	return total
+}
+
 type loader struct {
 	url           string
 	host          string
@@ -230,9 +245,7 @@ func newLoader(url, host string, concurrency, numRequests int, qps float64, clie
 	}
 }
 
-func (l *loader) run(ctx context.Context) (statusCodes map[int]int, err error) {
-	readyC := make(chan struct{}, l.concurrency)
-	startC := make(chan struct{})
+func (l *loader) run(ctx context.Context, readyC chan<- struct{}, startC <-chan struct{}) (statusCodes map[int]int, err error) {
 	var wg sync.WaitGroup
 	wg.Add(l.concurrency)
 	errors := make([]error, l.concurrency)
@@ -251,10 +264,6 @@ func (l *loader) run(ctx context.Context) (statusCodes map[int]int, err error) {
 			statusCodesList[i] = r.statusCodes
 		}(i)
 	}
-	for i := 0; i < l.concurrency; i++ {
-		<-readyC
-	}
-	close(startC)
 	wg.Wait()
 
 	for _, err := range errors {
