@@ -55,6 +55,11 @@ func main() {
 				Usage: "request timeout",
 				Value: 5 * time.Second,
 			},
+			&cli.BoolFlag{
+				Name:  "use-separate-client",
+				Usage: "use separate client for each requester",
+				Value: false,
+			},
 		},
 		Action: func(cCtx *cli.Context) error {
 			urls := cCtx.StringSlice("url")
@@ -63,6 +68,7 @@ func main() {
 			numRequests := cCtx.IntSlice("number")
 			qps := cCtx.Float64Slice("qps")
 			reqTimeout := cCtx.Duration("timeout")
+			useSeparateClient := cCtx.Bool("use-separate-client")
 
 			if len(urls) == 0 {
 				return cli.Exit("url flag must be set.", ExitCodeUssage)
@@ -90,7 +96,7 @@ func main() {
 				return cli.Exit("QPS value must not be negative.", ExitCodeUssage)
 			}
 
-			return run(concurrencies, numRequests, urls, hosts, reqTimeout, qps)
+			return run(concurrencies, numRequests, urls, hosts, reqTimeout, qps, useSeparateClient)
 		},
 	}
 
@@ -130,7 +136,7 @@ func isValidQPS(qps []float64) bool {
 	return true
 }
 
-func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time.Duration, qps []float64) error {
+func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time.Duration, qps []float64, useSeparateClient bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -140,6 +146,18 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Printf("start sending requests")
+
+	var clientFactory func() *http.Client
+	if useSeparateClient {
+		clientFactory = func() *http.Client {
+			return newHTTPClient(reqTimeout)
+		}
+	} else {
+		client := newHTTPClient(reqTimeout)
+		clientFactory = func() *http.Client {
+			return client
+		}
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(len(concurrencies))
@@ -151,7 +169,7 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 			defer wg.Done()
 
 			t0 := time.Now()
-			l := newLoader(urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i], reqTimeout)
+			l := newLoader(urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i], clientFactory)
 			statusCodes, err := l.run(ctx)
 			elapsedList[i] = time.Since(t0)
 			if err != nil {
@@ -185,23 +203,30 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 	return nil
 }
 
-type loader struct {
-	url         string
-	host        string
-	concurrency int
-	numRequests int
-	qps         float64
-	reqTimeout  time.Duration
+func newHTTPClient(reqTimeout time.Duration) *http.Client {
+	return &http.Client{
+		Transport: http.DefaultTransport.(*http.Transport).Clone(),
+		Timeout:   reqTimeout,
+	}
 }
 
-func newLoader(url, host string, concurrency, numRequests int, qps float64, reqTimeout time.Duration) *loader {
+type loader struct {
+	url           string
+	host          string
+	concurrency   int
+	numRequests   int
+	qps           float64
+	clientFactory func() *http.Client
+}
+
+func newLoader(url, host string, concurrency, numRequests int, qps float64, clientFactory func() *http.Client) *loader {
 	return &loader{
-		url:         url,
-		host:        host,
-		concurrency: concurrency,
-		numRequests: numRequests,
-		qps:         qps,
-		reqTimeout:  reqTimeout,
+		url:           url,
+		host:          host,
+		concurrency:   concurrency,
+		numRequests:   numRequests,
+		qps:           qps,
+		clientFactory: clientFactory,
 	}
 }
 
@@ -216,7 +241,7 @@ func (l *loader) run(ctx context.Context) (statusCodes map[int]int, err error) {
 		go func(i int) {
 			defer wg.Done()
 
-			r := newRequester(l.url, l.host, l.numRequests/l.concurrency, l.qps, l.reqTimeout)
+			r := newRequester(l.url, l.host, l.numRequests/l.concurrency, l.qps, l.clientFactory)
 			readyC <- struct{}{}
 			<-startC
 			if err := r.sendRequests(ctx); err != nil {
@@ -261,13 +286,9 @@ type requester struct {
 	statusCodes map[int]int
 }
 
-func newRequester(url, host string, numRequests int, qps float64, reqTimeout time.Duration) *requester {
-	client := &http.Client{
-		Transport: http.DefaultTransport.(*http.Transport).Clone(),
-		Timeout:   reqTimeout,
-	}
+func newRequester(url, host string, numRequests int, qps float64, clientFactory func() *http.Client) *requester {
 	return &requester{
-		client:      client,
+		client:      clientFactory(),
 		url:         url,
 		host:        host,
 		numRequests: numRequests,
