@@ -254,8 +254,12 @@ type requester struct {
 }
 
 func newRequester(url, host string, numRequests int, qps float64, reqTimeout time.Duration) *requester {
+	client := &http.Client{
+		Transport: http.DefaultTransport.(*http.Transport).Clone(),
+		Timeout:   reqTimeout,
+	}
 	return &requester{
-		client:      &http.Client{Timeout: reqTimeout},
+		client:      client,
 		url:         url,
 		host:        host,
 		numRequests: numRequests,
