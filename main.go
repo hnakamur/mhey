@@ -141,7 +141,6 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Printf("start sending requests")
 
-	client := &http.Client{Timeout: reqTimeout}
 	var wg sync.WaitGroup
 	wg.Add(len(concurrencies))
 	errors := make([]error, len(concurrencies))
@@ -152,7 +151,7 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 			defer wg.Done()
 
 			t0 := time.Now()
-			l := newLoader(client, urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i])
+			l := newLoader(urls[i], hosts[i], concurrencies[i], numRequests[i], qps[i], reqTimeout)
 			statusCodes, err := l.run(ctx)
 			elapsedList[i] = time.Since(t0)
 			if err != nil {
@@ -187,22 +186,22 @@ func run(concurrencies, numRequests []int, urls, hosts []string, reqTimeout time
 }
 
 type loader struct {
-	client      *http.Client
 	url         string
 	host        string
 	concurrency int
 	numRequests int
 	qps         float64
+	reqTimeout  time.Duration
 }
 
-func newLoader(c *http.Client, url, host string, concurrency, numRequests int, qps float64) *loader {
+func newLoader(url, host string, concurrency, numRequests int, qps float64, reqTimeout time.Duration) *loader {
 	return &loader{
-		client:      c,
 		url:         url,
 		host:        host,
 		concurrency: concurrency,
 		numRequests: numRequests,
 		qps:         qps,
+		reqTimeout:  reqTimeout,
 	}
 }
 
@@ -215,7 +214,7 @@ func (l *loader) run(ctx context.Context) (statusCodes map[int]int, err error) {
 		go func(i int) {
 			defer wg.Done()
 
-			r := newRequester(l.client, l.url, l.host, l.numRequests/l.concurrency, l.qps)
+			r := newRequester(l.url, l.host, l.numRequests/l.concurrency, l.qps, l.reqTimeout)
 			if err := r.sendRequests(ctx); err != nil {
 				errors[i] = err
 				return
@@ -254,9 +253,9 @@ type requester struct {
 	statusCodes map[int]int
 }
 
-func newRequester(c *http.Client, url, host string, numRequests int, qps float64) *requester {
+func newRequester(url, host string, numRequests int, qps float64, reqTimeout time.Duration) *requester {
 	return &requester{
-		client:      c,
+		client:      &http.Client{Timeout: reqTimeout},
 		url:         url,
 		host:        host,
 		numRequests: numRequests,
